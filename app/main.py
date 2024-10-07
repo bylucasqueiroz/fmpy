@@ -1,9 +1,11 @@
 import pandas as pd
 import re
+import os
 
 from datetime import datetime
 from fastapi import FastAPI, HTTPException
 from app.google_drive import download_csv, list_files_in_folder, upload_csv
+from app.helper import get_file_name
 
 app = FastAPI()
 
@@ -16,13 +18,17 @@ async def read_root():
 @app.get("/generate_expense/")
 async def generate_expense():
     try:
+        last_month_name = (datetime.now().month % 12) - 1  # Calculate last month
+        last_month_name = datetime(datetime.now().year, last_month_name, 1).strftime("%B").lower() 
+        
         # Get current and next month names
         current_month_name = datetime.now().strftime("%B").lower()  # Current month in lowercase
-        next_month_name = (datetime.now().month % 12) + 1  # Calculate next month
-        next_month_name = datetime(datetime.now().year, next_month_name, 1).strftime("%B").lower()  # Get next month name
 
-        # Download CSV content for the current month
-        csv_content = download_csv(current_month_name, GOOGLE_DRIVE_FOLDER_ID)
+        # Get Year
+        current_year = datetime.now().strftime("%Y")
+
+        # Download CSV content from Google Drive
+        csv_content = download_csv(get_file_name(current_year, last_month_name), GOOGLE_DRIVE_FOLDER_ID)
         
         # Read the CSV content into a DataFrame
         df = pd.read_csv(csv_content)
@@ -60,16 +66,22 @@ async def generate_expense():
                 df.at[index, 'FinalInstallment'] = final_installment
         
         # Filter out rows where CurrentInstallment equals FinalInstallment
-        df_filtered = df[~(df['CurrentInstallment'] == df['FinalInstallment'])]
+        df_filtered = df[~(df['CurrentInstallment'] == df['FinalInstallment']) | (df['ExpenseType'] == 'Fixed')]
 
         # Save the filtered DataFrame to a new CSV file
-        output_csv_path = f"{next_month_name}.csv"
+        output_csv_path = get_file_name(current_year, current_month_name)
         df_filtered.to_csv(output_csv_path, index=False)
 
         # Upload the new CSV to Google Drive
-        upload_csv(output_csv_path, next_month_name, GOOGLE_DRIVE_FOLDER_ID)
+        upload_csv(output_csv_path, GOOGLE_DRIVE_FOLDER_ID)
 
-        return {"message": f"Filtered CSV for {next_month_name} created successfully."}
+        if os.path.exists(output_csv_path):
+            os.remove(output_csv_path)
+            print(f"{output_csv_path} has been deleted successfully.")
+        else:
+            print(f"{output_csv_path} does not exist.")
+
+        return {"message": f"Filtered CSV for {output_csv_path} created successfully."}
 
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
@@ -78,15 +90,13 @@ async def generate_expense():
 async def get_current_expense():
     try:
         # Get Year
-        current_year = datetime.year
+        current_year = datetime.now().strftime("%Y")
 
         # Get actual month
-        current_month_name = datetime.now().strftime("%B")
-
-        folder_name = f'${current_year}_${current_month_name}'
+        current_month_name = datetime.now().strftime("%B").lower()
 
         # Download CSV content from Google Drive
-        csv_content = download_csv(folder_name, GOOGLE_DRIVE_FOLDER_ID)
+        csv_content = download_csv(get_file_name(current_year, current_month_name), GOOGLE_DRIVE_FOLDER_ID)
         
         # Read the CSV content into a DataFrame
         df = pd.read_csv(csv_content)

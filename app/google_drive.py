@@ -1,5 +1,5 @@
 from googleapiclient.discovery import build
-from googleapiclient.http import MediaIoBaseDownload
+from googleapiclient.http import MediaIoBaseDownload, MediaFileUpload
 import io
 import pandas as pd
 from google.oauth2 import service_account
@@ -50,7 +50,7 @@ def download_csv(file_name, folder_id):
     file_stream.seek(0)
     return io.StringIO(file_stream.read().decode('utf-8'))
 
-def upload_csv(file_path, file_name, folder_id):
+def upload_csv(file_name, folder_id):
     """Uploads a CSV file to Google Drive in the specified folder."""
     credentials = service_account.Credentials.from_service_account_file(
         SERVICE_ACCOUNT_FILE, scopes=SCOPES)
@@ -59,11 +59,12 @@ def upload_csv(file_path, file_name, folder_id):
     # Create a new file metadata
     file_metadata = {
         'name': file_name,
+        'mimeType': 'application/vnd.google-apps.spreadsheet',  # This ensures it is created as a Google Sheet
         'parents': [folder_id]  # Specify the folder ID where the file should be uploaded
     }
 
     # Upload the file
-    media = MediaFileUpload(file_path, mimetype='text/csv')
+    media = MediaFileUpload(file_name, mimetype='text/csv')
     file = service.files().create(body=file_metadata, media_body=media, fields='id').execute()
 
     return file.get('id')  # Return the ID of the uploaded file
