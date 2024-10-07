@@ -5,7 +5,7 @@ import os
 from datetime import datetime
 from fastapi import FastAPI, HTTPException
 from app.google_drive import download_csv, list_files_in_folder, upload_csv
-from app.helper import get_file_name
+from app.helper import get_file_name, clen_file
 
 app = FastAPI()
 
@@ -14,6 +14,68 @@ GOOGLE_DRIVE_FOLDER_ID = "MY_ID"
 @app.get("/")
 async def read_root():
     return {"message": "Welcome to the CSV API using Google Drive"}
+
+@app.get("/generate_expense_report/")
+async def generate_expense_report(person: str = None, category: str = None, payment_type: str = None):
+    try:
+        # Get the current month and year
+        current_month_name = datetime.now().strftime("%B").lower()
+        current_year = datetime.now().year
+        file_name = f"{current_year}_{current_month_name}"
+        
+        # Download CSV content from Google Drive
+        csv_content = download_csv(file_name, GOOGLE_DRIVE_FOLDER_ID)
+        
+        # Read the CSV content into a DataFrame
+        df = pd.read_csv(csv_content)
+        
+        # Clean the DataFrame: Replace NaN and infinite values
+        df = df.replace([float('inf'), float('-inf')], None)  # Replace inf/-inf with None
+        df = df.where(pd.notnull(df), None)  # Replace NaN with None
+
+        # Filter by person and category if provided
+        if person:
+            df = df[df['Person'] == person]
+        if category:
+            df = df[df['Category'] == category]
+        if payment_type:
+            df = df[df['PaymentType'] == payment_type]
+
+        # Clean the 'Amount' column: Remove 'R$ ' and commas, then convert to float
+        df['Amount'] = df['Amount'].replace({'R\$ ': '', '\.': '', ',': '.'}, regex=True).astype(float)
+
+        # Group by ExpenseType and calculate the total Amount
+        result = df.groupby('ExpenseType')['Amount'].sum().reset_index()
+
+        # Convert the result to a list of dictionaries for JSON response
+        result_json = result.to_dict(orient='records')
+
+        # Generate the result CSV file
+        result_file_name = f"{current_year}_{current_month_name}_result"
+        
+        # Check if the result file already exists
+        existing_files = list_files_in_folder(GOOGLE_DRIVE_FOLDER_ID)
+        existing_file = next((f for f in existing_files if f['name'] == result_file_name), None)
+
+        if existing_file:
+            # Update the existing file
+            file_id = existing_file['id']
+            # Save the result to a local CSV file first
+            result.to_csv(result_file_name, index=False)
+            upload_csv(result_file_name, GOOGLE_DRIVE_FOLDER_ID, file_id)
+        else:
+            # Create a new file
+            result.to_csv(result_file_name, index=False)
+            upload_csv(result_file_name, GOOGLE_DRIVE_FOLDER_ID)
+
+        clen_file(result_file_name)
+
+        # Return the result in JSON format
+        return {"message": "Expense report generated successfully", "data": result_json}
+
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
 
 @app.get("/generate_expense/")
 async def generate_expense():
@@ -75,11 +137,7 @@ async def generate_expense():
         # Upload the new CSV to Google Drive
         upload_csv(output_csv_path, GOOGLE_DRIVE_FOLDER_ID)
 
-        if os.path.exists(output_csv_path):
-            os.remove(output_csv_path)
-            print(f"{output_csv_path} has been deleted successfully.")
-        else:
-            print(f"{output_csv_path} does not exist.")
+        clen_file(output_csv_path)
 
         return {"message": f"Filtered CSV for {output_csv_path} created successfully."}
 

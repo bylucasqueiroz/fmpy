@@ -50,24 +50,35 @@ def download_csv(file_name, folder_id):
     file_stream.seek(0)
     return io.StringIO(file_stream.read().decode('utf-8'))
 
-def upload_csv(file_name, folder_id):
-    """Uploads a CSV file to Google Drive in the specified folder."""
+def upload_csv(file_name, folder_id, file_id=None):
+    """Uploads a CSV file to Google Drive in the specified folder or updates it if file_id is provided."""
     credentials = service_account.Credentials.from_service_account_file(
         SERVICE_ACCOUNT_FILE, scopes=SCOPES)
     service = build('drive', 'v3', credentials=credentials)
 
-    # Create a new file metadata
-    file_metadata = {
-        'name': file_name,
-        'mimeType': 'application/vnd.google-apps.spreadsheet',  # This ensures it is created as a Google Sheet
-        'parents': [folder_id]  # Specify the folder ID where the file should be uploaded
-    }
+    if file_id:
+        # Update the existing file
+        file_metadata = {
+            'name': file_name.split('/')[-1],  # Use just the file name
+            # No need to specify 'parents' here as we are only updating the file itself
+        }
+        media = MediaFileUpload(file_name, mimetype='text/csv')
+        service.files().update(fileId=file_id, body=file_metadata, media_body=media).execute()
+        return file_id  # Return the ID of the updated file
 
-    # Upload the file
-    media = MediaFileUpload(file_name, mimetype='text/csv')
-    file = service.files().create(body=file_metadata, media_body=media, fields='id').execute()
+    else:
+        # Create a new file
+        file_metadata = {
+            'name': file_name.split('/')[-1],
+            'mimeType': 'application/vnd.google-apps.spreadsheet',  # This ensures it is created as a Google Sheet
+            'parents': [folder_id]  # Specify the folder ID where the file should be uploaded
+        }
 
-    return file.get('id')  # Return the ID of the uploaded file
+        # Upload the file
+        media = MediaFileUpload(file_name, mimetype='text/csv')
+        file = service.files().create(body=file_metadata, media_body=media, fields='id').execute()
+
+        return file.get('id')  # Return the ID of the uploaded file
 
 def list_files_in_folder(folder_id):
     """List all files in a specific Google Drive folder."""
